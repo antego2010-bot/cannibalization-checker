@@ -126,6 +126,28 @@ export async function buildLibrary(inp: BuildInput): Promise<Library> {
     cann.push({ g, main, urls: list.map((x, i) => ({ ...x, role: i === 0 ? "Main" : "Cannibalizing" })), severity, clicks: totClicks, impr: totImpr });
   });
 
+  // ---- 3b. without Search Console: other pages whose title + URL target the same keyword ----
+  // Moz reports one ranking page per keyword, so pages that are built around the same keyword are the next best signal.
+  const targetsOf = new Map<string, string[]>();
+  if (!inp.gsc) {
+    const cannKw = new Set(cann.map(c => c.g.keyword));
+    const docs = inp.pages.filter(p => !excluded(p.u)).map(p => ({ u: p.u, t: new Set(toks(p.t + " " + p.u.split("/").filter(Boolean).pop()!.replace(/-/g, " "))) }));
+    const df = new Map<string, number>(); docs.forEach(d => d.t.forEach(t => df.set(t, (df.get(t) || 0) + 1)));
+    groups.forEach(g => {
+      if (cannKw.has(g.keyword) || (mozVol.get(g.keyword) ?? 0) < 20) return;
+      const k = [...new Set(toks(g.keyword))];
+      if (k.length < 2 || k.every(t => (df.get(t) || 0) > docs.length * 0.15)) return; // too generic to mean anything
+      const [main, mv] = [...g.pages.entries()].sort((a, b) => a[1].pos - b[1].pos)[0];
+      const hits = docs.filter(d => d.u !== main && k.every(t => d.t.has(t)))
+        .map(d => ({ u: d.u, score: k.length / d.t.size })).sort((a, b) => b.score - a.score).slice(0, 4);
+      if (!hits.length) return;
+      hits.forEach(h => (targetsOf.get(h.u) || targetsOf.set(h.u, []).get(h.u)!).push(g.keyword));
+      g.source = "Moz + page titles";
+      cann.push({ g, main, severity: mv.pos <= 10 ? "Medium" : "Low", clicks: 0, impr: 0,
+        urls: [{ path: main, clicks: null, impr: null, pos: mv.pos, role: "Main" }, ...hits.map(h => ({ path: h.u, clicks: null, impr: null, pos: NaN, role: "Cannibalizing" }))] });
+    });
+  }
+
   // ---- 4. Moz volume + intent for the keywords that matter most ----
   const needVol = [...new Set([
     ...cann.sort((a, b) => b.impr - a.impr || b.clicks - a.clicks).map(c => c.g.keyword),
@@ -149,7 +171,7 @@ export async function buildLibrary(inp: BuildInput): Promise<Library> {
   groups.forEach(g => g.pages.forEach((v, p) => { (pagesKw.get(p) || pagesKw.set(p, []).get(p)!).push({ kw: g.keyword, ...v }); }));
   const allPaths = new Set([...byPath.keys(), ...pagesKw.keys()]);
   const mainOf = new Map<string, string[]>(), competesOf = new Map<string, string[]>();
-  cann.forEach(c => c.urls.forEach(u => { const m = u.role === "Main" ? mainOf : competesOf; (m.get(u.path) || m.set(u.path, []).get(u.path)!).push(c.g.keyword); }));
+  cann.forEach(c => c.urls.forEach(u => { if (Number.isNaN(u.pos)) return; const m = u.role === "Main" ? mainOf : competesOf; (m.get(u.path) || m.set(u.path, []).get(u.path)!).push(c.g.keyword); }));
   type InvRow = { path: string; title: string; topic: string; target: string; vol: number | null; status: string; clicks: number | null; impr: number | null; pos: number | null; section: string; published: string; intent: string; sessions: number | null; cluster: string; overlap: string };
   const inv: InvRow[] = [];
   allPaths.forEach(path => {
@@ -160,7 +182,7 @@ export async function buildLibrary(inp: BuildInput): Promise<Library> {
     const impr = inp.gsc ? kws.reduce((a, k) => a + (k.impr || 0), 0) : null;
     const pos = kws.length ? (impr ? Math.round(kws.reduce((a, k) => a + k.pos * (k.impr || 0), 0) / impr * 10) / 10 : Math.min(...kws.map(k => k.pos))) : null;
     const title = pg ? pg.t : "";
-    inv.push({ path, title, topic: target || cleanTitle(title || path.split("/").pop()!.replace(/-/g, " "), brand), target, vol: target ? mozVol.get(target) ?? null : null, status: statusOf(kws.length ? Math.min(...kws.map(k => k.pos)) : null), clicks, impr, pos, section: sectionOf(path), published: pg ? pg.d : "", intent: target ? intentOf(target, mozIntent.get(target)) : "", sessions: inp.ga4 ? inp.ga4.get(path) ?? 0 : null, cluster: "", overlap: mainOf.has(path) || competesOf.has(path) ? "Ranking cannibalization" : "None" });
+    inv.push({ path, title, topic: target || cleanTitle(title || path.split("/").pop()!.replace(/-/g, " "), brand), target, vol: target ? mozVol.get(target) ?? null : null, status: statusOf(kws.length ? Math.min(...kws.map(k => k.pos)) : null), clicks, impr, pos, section: sectionOf(path), published: pg ? pg.d : "", intent: target ? intentOf(target, mozIntent.get(target)) : "", sessions: inp.ga4 ? inp.ga4.get(path) ?? 0 : null, cluster: "", overlap: mainOf.has(path) || competesOf.has(path) ? "Ranking cannibalization" : targetsOf.has(path) ? "Keyword targeting overlap" : "None" });
   });
 
   // topic clusters: the most specific shared word (appears in 3+ topics but not everywhere)
@@ -190,7 +212,7 @@ export async function buildLibrary(inp: BuildInput): Promise<Library> {
   });
   const clusters = new Map<number, number[]>(); inv.forEach((_, i) => { const r = find(i); (clusters.get(r) || clusters.set(r, []).get(r)!).push(i); });
   const ovRows: (string | number)[][] = [];
-  const pairKw = new Set<string>(); cann.forEach(c => { const ps = c.urls.map(u => u.path); for (const a of ps) for (const b of ps) if (a !== b) pairKw.add(a + "|" + b); });
+  const pairKw = new Set<string>(); cann.forEach(c => { const ps = c.urls.filter(u => !Number.isNaN(u.pos)).map(u => u.path); for (const a of ps) for (const b of ps) if (a !== b) pairKw.add(a + "|" + b); });
   clusters.forEach(ix => {
     if (ix.length < 2) return;
     const rows = ix.map(i => inv[i]).sort((a, b) => (b.clicks ?? b.sessions ?? 0) - (a.clicks ?? a.sessions ?? 0) || (b.vol || 0) - (a.vol || 0));
@@ -217,15 +239,15 @@ export async function buildLibrary(inp: BuildInput): Promise<Library> {
     const clicks = list.reduce((a, x) => a + (x.clicks || 0), 0), impr = list.reduce((a, x) => a + (x.impr || 0), 0);
     return { g, c, top, clicks, impr };
   }).sort((a, b) => (mozVol.get(b.g.keyword) || 0) - (mozVol.get(a.g.keyword) || 0) || b.impr - a.impr).slice(0, 20000);
-  libList.forEach(({ g, c, top, clicks, impr }) => libT.rows.push([g.keyword, mozVol.get(g.keyword) ?? "", mozDiff.get(g.keyword) ?? "", full(top.path), top.pos, c ? "Yes" : "No", c ? c.urls.slice(1).map(u => `${full(u.path)} (#${u.pos})`).join(", ") : "", c ? c.severity : "", sectionOf(top.path), g.source, inp.gsc ? clicks : "", inp.gsc ? impr : ""]));
+  libList.forEach(({ g, c, top, clicks, impr }) => libT.rows.push([g.keyword, mozVol.get(g.keyword) ?? "", mozDiff.get(g.keyword) ?? "", full(top.path), top.pos, c ? "Yes" : "No", c ? c.urls.slice(1).map(u => `${full(u.path)} (${Number.isNaN(u.pos) ? "title match" : "#" + u.pos})`).join(", ") : "", c ? c.severity : "", sectionOf(top.path), g.source, inp.gsc ? clicks : "", inp.gsc ? impr : ""]));
 
   const kuT: Table = { cols: ["Keyword", "Search volume", "Severity", "Section", "Source", "Main URL", "URL", "Role", "Position", "Clicks (3 mo)", "Impressions (3 mo)"], rows: [] };
-  cann.forEach(c => c.urls.forEach(u => kuT.rows.push([c.g.keyword, mozVol.get(c.g.keyword) ?? "", c.severity, sectionOf(c.main), c.g.source, full(c.main), full(u.path), u.role, u.pos, u.clicks ?? "", u.impr ?? ""])));
+  cann.forEach(c => c.urls.forEach(u => kuT.rows.push([c.g.keyword, mozVol.get(c.g.keyword) ?? "", c.severity, sectionOf(c.main), c.g.source, full(c.main), full(u.path), u.role, Number.isNaN(u.pos) ? "" : u.pos, u.clicks ?? "", u.impr ?? ""])));
 
   const ovT: Table = { cols: ["Topic", "Cluster", "Strongest page", "Strongest page stats", "Other pages (clicks, year, status)", "Ranking cannibalization evidence?", "Suggested action", "# pages", "Total clicks (3 mo)", "Total impressions (3 mo)"], rows: ovRows.sort((a, b) => Number(b[7]) - Number(a[7])) };
 
   return {
     inv: invT, lib: libT, ov: ovT, ku: kuT,
-    meta: { domain, builtAt: new Date().toISOString(), sources: [inp.gsc ? `Search Console (${inp.gsc.siteUrl}, ${inp.gsc.start} to ${inp.gsc.end})` : null, `Moz API (${mozFetched} ranking keywords)`, inp.ga4 ? `GA4 (property ${inp.ga4Property}, last 12 months)` : null, `Site index (${inp.pages.length} pages)`].filter(Boolean), mode: inp.gsc ? "gsc" : "moz", urls: invT.rows.length, keywords: libT.rows.length, cannibalized: cann.length, overlaps: ovT.rows.length, mozKeywordRows: mozFetched, mozVolumeLookups: needVol.length },
+    meta: { domain, builtAt: new Date().toISOString(), sources: [inp.gsc ? `Search Console (${inp.gsc.siteUrl}${inp.gsc.start ? `, ${inp.gsc.start} to ${inp.gsc.end}` : ""})` : null, `Moz API (${mozFetched} ranking keywords)`, inp.ga4 ? `GA4 (${/^\d+$/.test(String(inp.ga4Property)) ? "property " + inp.ga4Property + ", last 12 months" : inp.ga4Property})` : null, `Site index (${inp.pages.length} pages)`].filter(Boolean), mode: inp.gsc ? "gsc" : "moz", urls: invT.rows.length, keywords: libT.rows.length, cannibalized: cann.length, overlaps: ovT.rows.length, mozKeywordRows: mozFetched, mozVolumeLookups: needVol.length },
   };
 }
