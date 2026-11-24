@@ -31,7 +31,7 @@ const SKEY = "cc:settings";
 function loadSettings() {
   let s = {};
   try { s = JSON.parse(sessionStorage.getItem(SKEY) || localStorage.getItem(SKEY) || "{}"); } catch (e) {}
-  return { moz: "", claude: "", model: "", domain: "", brand: "", exclude: "", sections: "", size: 1000, mozRows: 1000, volumeLimit: 200, gscSite: "", ga4Property: "", ga4Skip: false, mozOnly: false, remember: false, ...s };
+  return { moz: "", claude: "", model: "", domain: "", brand: "", exclude: "", sections: "", size: 1000, mozRows: 1000, volumeLimit: 200, gscSite: "", ga4Property: "", ga4Skip: false, mozOnly: false, remember: false, ...s, mozOnly: true };
 }
 let CFG = loadSettings();
 function saveSettings() {
@@ -52,7 +52,13 @@ async function api(path, payload, opts = {}) {
   const headers = { "content-type": "application/json" };
   if (CFG.moz) headers["x-moz-token"] = CFG.moz;
   if (CFG.claude) headers["x-claude-key"] = CFG.claude;
-  const res = await fetch("/api/" + path, { method: payload === undefined ? "GET" : "POST", headers, body: payload === undefined ? undefined : JSON.stringify(payload), signal: opts.signal, credentials: "same-origin" });
+  let reqBody = payload === undefined ? undefined : JSON.stringify(payload);
+  if (reqBody && opts.gzip) {
+    reqBody = await new Response(new Blob([reqBody]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+    if (reqBody.byteLength > 4_300_000) throw new ApiError("Your Search Console file is too big to send in one go (over 4 MB compressed). Export a shorter date range or fewer rows, then upload it again.", "too_large", 413);
+    headers["content-type"] = "application/octet-stream"; headers["x-body-encoding"] = "gzip";
+  }
+  const res = await fetch("/api/" + path, { method: payload === undefined ? "GET" : "POST", headers, body: reqBody, signal: opts.signal, credentials: "same-origin" });
   if (res.ok && res.headers.get("x-library-encoding") === "gzip") return await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).json();
   let data = null; try { data = await res.json(); } catch (e) {}
   if (!res.ok) { const er = (data && data.error) || {}; throw new ApiError(er.message || `Request failed (${res.status})`, er.code || "http_" + res.status, res.status); }
@@ -66,7 +72,7 @@ const IDB = (() => {
   const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const t = db.transaction("kv", mode); const req = fn(t.objectStore("kv")); t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); };
   return { get: (k) => tx("readonly", s => s.get(k)).catch(() => null), set: (k, v) => tx("readwrite", s => s.put(v, k)), del: (k) => tx("readwrite", s => s.delete(k)).catch(() => null) };
 })();
-const K = { lib: () => "lib:" + siteDomain(), reviews: () => "reviews:" + siteDomain(), checks: () => "checks:" + siteDomain(), topics: () => "topicReviews:" + siteDomain() };
+const K = { up: () => "upload:" + siteDomain(), lib: () => "lib:" + siteDomain(), reviews: () => "reviews:" + siteDomain(), checks: () => "checks:" + siteDomain(), topics: () => "topicReviews:" + siteDomain() };
 
 // ---------- state ----------
 const S = {
@@ -79,7 +85,7 @@ const S = {
   checks: [],
   lib: { section: "", q: "", cluster: "", status: "", overlap: "", intent: "", col: {}, sort: { key: "Clicks (3 mo)", dir: -1 }, page: 0, hidden: new Set(), open: null },
   cn: { mode: "kw", page: 0, tpage: 0 },
-  readOnly: false, site: null, google: null, building: false,
+  readOnly: false, site: null, google: null, building: false, up: {},
 };
 // Claude, through this app's server with the user's own key. Same shape the artifact used (SAMPLE.json).
 const CLAUDE = { json: async (prompt, opts = {}) => (await api("claude", { prompt, model: CFG.model }, { signal: opts.signal })).json };
@@ -97,7 +103,8 @@ function statusLine() {
 }
 function saveLocal(key, value) { return IDB.set(key, value).catch(() => toast("Couldn't save in this browser (storage full or private mode).")); }
 async function loadLocal() {
-  const [rv, ch, tp] = await Promise.all([IDB.get(K.reviews()), IDB.get(K.checks()), IDB.get(K.topics())]);
+  const [rv, ch, tp, up] = await Promise.all([IDB.get(K.reviews()), IDB.get(K.checks()), IDB.get(K.topics()), IDB.get(K.up())]);
+  S.up = up && typeof up === "object" ? up : {};
   S.reviews = new Map((rv || []).map(v => [docId(v.keyword), v]));
   S.checks = Array.isArray(ch) ? ch : [];
   S.topicReviews = tp && typeof tp === "object" ? tp : {};
@@ -159,6 +166,7 @@ function ruleRec(g, u) {
   const kw = `"${g.keyword}"`;
   if (u.role === "Main") return { action: "Keep as primary", cls: "good", text: (u.clicks != null ? "Most clicks" : "Best position") + " for this keyword. Keep it as the page that targets it and point internal links here with descriptive anchors." };
   const secM = im["Section"] || "", secC = ic["Section"] || "";
+  if (u.pos == null && u.clicks == null) return { action: "Retarget or merge", cls: "warn", text: `Its title and URL target ${kw}, but ${short(main.url)} is the page that ranks${main.pos != null ? ` (#${fmt(main.pos)})` : ""}. Give this page its own angle in the title and H1 and link to ${short(main.url)} with ${kw} as the anchor, or merge it in if it adds little.` };
   const hubs = ["Learn", "Guide", "Product", "Resources", "Docs", "Academy"];
   const share = (u.clicks || 0) / Math.max(1, (u.clicks || 0) + (main.clicks || 0));
   const yr = yearOf(ic["Published"]);
@@ -340,7 +348,7 @@ function renderCn() {
   const topic = S.cn.mode === "topic";
   $("cn-kw-filters").hidden = topic; $("cn-topic-filters").hidden = !topic;
   $("cn-ask-page").textContent = topic ? "Ask Claude to review this page of topic groups" : "Ask Claude to review this page of keywords";
-  $("cn-mode-help").textContent = topic ? "Groups of pages that cover the same topic, with Claude's review of each group." : (S.meta && S.meta.mode === "gsc" ? "Keywords where more than one of your URLs gets real impressions (Search Console query → page data, Moz for the rest)." : "Keywords where more than one of your URLs ranks (Moz ranking data; connect Search Console in Settings for the full picture).");
+  $("cn-mode-help").textContent = topic ? "Groups of pages that cover the same topic, with Claude's review of each group." : (S.meta && S.meta.mode === "gsc" ? "Keywords where more than one of your URLs gets real impressions (Search Console query → page data, Moz for the rest)." : "Keywords where more than one of your URLs competes: close keyword variants ranking different pages (Moz), and pages whose title and URL target a keyword another page ranks for.");
   return topic ? renderTopics() : renderKeywords();
 }
 
@@ -627,7 +635,7 @@ Reply with only a JSON array: [{"topic": string (exactly as given), "review": st
 function renderBrand() {
   const d = siteDomain();
   $("brand-mark").textContent = d ? (brandName()[0] || "C").toUpperCase() : "C";
-  $("brand-sub").textContent = d ? `${d} · ${S.meta ? (S.meta.mode === "gsc" ? "Search Console (last 3 months)" : "Moz ranking keywords") + (S.meta.sources && S.meta.sources.some(s => /^GA4/.test(s)) ? " + GA4" : "") : "Search Console + GA4"} + Moz API` : "Search Console + GA4 + Moz API · sign in with your own Google account";
+  $("brand-sub").textContent = d ? `${d} · ${S.meta ? (S.meta.mode === "gsc" ? "Search Console (last 3 months)" : "Moz ranking keywords") + (S.meta.sources && S.meta.sources.some(s => /^GA4/.test(s)) ? " + GA4" : "") : "Moz ranking keywords"} + Moz API` : "Moz API · bring your own key";
   document.querySelectorAll("[data-site]").forEach(el => el.textContent = d || "your site");
   $("rebuild-btn").hidden = !d; $("xlsx-btn").hidden = !S.data;
 }
@@ -640,8 +648,8 @@ function showEmpty(kind, msg) {
   box.innerHTML = kind === "error"
     ? `<strong>The library couldn't be built</strong><span class="muted small" style="max-width:640px">${esc(msg)}</span><div class="filter-row" style="justify-content:center"><button class="btn primary" type="button" data-build>Try again</button><a class="btn" href="#settings">Open Settings</a></div>`
     : settingsReady
-      ? `<strong>No library for ${esc(siteDomain())} yet</strong><span class="muted small" style="max-width:640px">Building it indexes your site, reads Search Console, GA4 and Moz, then finds every keyword where more than one of your pages competes. It takes 2–5 minutes and is saved in this browser.</span><div class="filter-row" style="justify-content:center"><button class="btn primary" type="button" data-build>Build the library</button><a class="btn" href="#settings">Review settings first</a></div>`
-      : `<strong>Start in Settings</strong><span class="muted small" style="max-width:640px">Sign in with Google and pick your Search Console and GA4 properties, then add your Moz API token. You only ever see data your own Google account can access.</span><div class="filter-row" style="justify-content:center"><a class="btn primary" href="#settings">Open Settings</a></div>`;
+      ? `<strong>No library for ${esc(siteDomain())} yet</strong><span class="muted small" style="max-width:640px">Building it indexes your site, reads your Search Console and GA4 file if you uploaded one, pulls the keywords you rank for from Moz, then finds every keyword where more than one of your pages competes. It takes 2–5 minutes and is saved in this browser.</span><div class="filter-row" style="justify-content:center"><button class="btn primary" type="button" data-build>Build the library</button><a class="btn" href="#settings">Review settings first</a></div>`
+      : `<strong>Start in Settings</strong><span class="muted small" style="max-width:640px">Add your Moz API token and your site's domain, and upload your Search Console and GA4 export for the most accurate results. Everything stays in your browser.</span><div class="filter-row" style="justify-content:center"><a class="btn primary" href="#settings">Open Settings</a></div>`;
   box.querySelectorAll("[data-build]").forEach(b => b.onclick = buildLib);
 }
 
@@ -694,7 +702,7 @@ function renderSettings() {
   const sel = $("s-model");
   if (CFG.model && ![...sel.options].some(o => o.value === CFG.model)) sel.innerHTML = `<option value="${esc(CFG.model)}">${esc(CFG.model)}</option>` + sel.innerHTML;
   sel.value = CFG.model || "";
-  renderSizes(); renderRows(); renderSite(); renderGoogle(); renderDataBox(); updateStatus();
+  renderSizes(); renderRows(); renderSite(); renderGoogle(); renderDataBox(); renderUploads(); updateStatus();
   if (!S.site && siteDomain()) refreshSite();
   if (!S.google) refreshGoogle();
 }
@@ -733,11 +741,11 @@ function renderRows() {
   renderCost();
 }
 function renderCost() {
-  const g = useGoogle();
+  const g = useGoogle() || !!(S.up && S.up.gsc);
   const rows = Number(CFG.mozRows) || 1000, vol = g ? Number(CFG.volumeLimit) || 0 : 0;
   $("s-cost").innerHTML = `<b>Estimated cost of one build</b>
     <div class="small">Moz API: up to <b>${fmt(rows + vol * 5)} rows</b> (${fmt(rows)} ranking keywords${g ? ` + search volume for up to ${fmt(vol)} Search Console keywords at up to 5 rows each` : ""}). Your plan's quota is shown in the Moz API dashboard.</div>
-    <div class="small">Google: free (Search Console and GA4 have no per-call cost). Claude: none to build. Asking Claude to review costs one request per 5 keywords or 8 topic groups on your Anthropic account, usually a few cents each.</div>`;
+    <div class="small">${g ? "Search Console and GA4 data: free. " : ""}Claude: none to build. Asking Claude to review costs one request per 5 keywords or 8 topic groups on your Anthropic account, usually a few cents each.</div>`;
 }
 function renderSite() {
   const el = $("s-site"), s = S.site;
@@ -782,7 +790,9 @@ function indexSite(onProgress, opts = {}) {
 }
 
 // ---------- Google (Search Console + GA4), optional ----------
+const GOOGLE_ENABLED = false; // Google sign-in (Search Console + GA4) is built but switched off: the library runs on Moz data.
 async function refreshGoogle() {
+  if (!GOOGLE_ENABLED) { S.google = { configured: false }; renderHeadGoogle(); renderCost(); return; }
   try { S.google = await api("google/status"); } catch (e) { S.google = { error: e.message }; }
   const g = S.google;
   if (g && g.connected) {
@@ -836,7 +846,7 @@ function renderDataBox() {
     <div class="small muted">Built ${esc(new Date(S.loadedAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }))} from ${esc((m.sources || []).join(" · "))}</div>
     <div class="filter-row"><button class="btn small" type="button" id="s-xlsx">Download .xlsx</button><button class="btn small" type="button" id="s-clear">Delete from this browser</button></div>`;
   $("s-xlsx").onclick = downloadXlsx;
-  $("s-clear").onclick = async () => { await Promise.all([IDB.del(K.lib()), IDB.del(K.reviews()), IDB.del(K.checks()), IDB.del(K.topics())]); S.data = null; S.meta = null; S.reviews = new Map(); S.checks = []; S.topicReviews = {}; renderDataBox(); updateStatus(); toast("Library, reviews and checks deleted from this browser."); };
+  $("s-clear").onclick = async () => { await Promise.all([IDB.del(K.lib()), IDB.del(K.reviews()), IDB.del(K.checks()), IDB.del(K.topics()), IDB.del(K.up())]); S.data = null; S.meta = null; S.reviews = new Map(); S.checks = []; S.topicReviews = {}; S.up = {}; renderDataBox(); renderUploads(); updateStatus(); toast("Library, uploaded files, reviews and checks deleted from this browser."); };
 }
 function bindSettings() {
   const upd = () => {
@@ -856,7 +866,90 @@ function bindSettings() {
     try { await indexSite(null, { restart }); toast("Site indexed."); } catch (e) { $("s-msg2").textContent = e.message; }
   };
   $("s-build").onclick = () => { upd(); buildLib(); };
+  $("s-upload").onchange = (e) => { onUpload(e.target.files); e.target.value = ""; };
   $("s-forget").onclick = () => { CFG.moz = ""; CFG.claude = ""; CFG.remember = false; try { sessionStorage.removeItem(SKEY); } catch (e) {} saveSettings(); renderSettings(); toast("Keys removed from this browser."); };
+}
+
+// ---------- your own data: Search Console / GA4 exports, or a whole library ----------
+const hnorm = (h) => String(h ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const colOf = (h, names) => h.findIndex(x => names.includes(x));
+const GSC_Q = ["query", "queries", "top queries", "search query", "keyword", "keywords"], GSC_P = ["page", "pages", "url", "landing page", "top pages", "address"];
+const GA_P = ["pagepath", "page path", "page path and screen class", "landingpage", "landing page", "landing page query string", "pagelocation", "page location", "page", "url"];
+function headerRow(aoa, test) { for (let i = 0; i < Math.min(aoa.length, 40); i++) { const h = (aoa[i] || []).map(hnorm); const m = test(h); if (m) return { i, m }; } return null; }
+const pathOfUrl = (u) => { let s = String(u || "").trim(); try { if (/^https?:/i.test(s)) s = new URL(s).pathname; } catch (e) {} s = s.split(/[?#]/)[0].replace(/\/+$/, ""); return s || "/"; };
+const hostOf = (u) => { try { return new URL(String(u)).hostname.replace(/^www\./, "").toLowerCase(); } catch (e) { return ""; } };
+const LIB_TABS = { inv: "URL Inventory", lib: "Cannibalization Library", ov: "Topic Overlaps", ku: "Keyword URLs" };
+function tableOf(aoa) {
+  const head = (aoa[0] || []).map(h => String(h ?? "").trim()); let last = head.length; while (last > 0 && !head[last - 1]) last--;
+  const cols = head.slice(0, last);
+  return { cols, rows: aoa.slice(1).filter(r => r.some(c => c !== "" && c != null)).map(r => cols.map((_, i) => { const v = r[i]; return v == null ? "" : typeof v === "number" ? v : String(v); })) };
+}
+async function readUploads(files) {
+  await loadXlsxLib();
+  const found = { gsc: null, ga4: null, lib: null }, notes = [];
+  for (const file of files) {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const names = wb.SheetNames;
+    if (names.includes(LIB_TABS.inv) && (names.includes(LIB_TABS.ku) || names.includes(LIB_TABS.lib))) {
+      const data = {}; for (const [k, n] of Object.entries(LIB_TABS)) data[k] = names.includes(n) ? tableOf(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: "" })) : { cols: [], rows: [] };
+      found.lib = { data, name: file.name }; continue;
+    }
+    for (const n of names) {
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: "" });
+      const g = headerRow(aoa, h => { const q = colOf(h, GSC_Q), p = colOf(h, GSC_P), c = colOf(h, ["clicks"]), im = colOf(h, ["impressions", "impr"]), pos = colOf(h, ["position", "avg position", "average position", "avg pos"]); return q >= 0 && p >= 0 && c >= 0 && im >= 0 && pos >= 0 ? { q, p, c, im, pos } : null; });
+      if (g) {
+        const { q, p, c, im, pos } = g.m; const rows = found.gsc ? found.gsc.rows : [];
+        for (const r of aoa.slice(g.i + 1)) { const ps = num(r[pos]); if (!r[q] || !r[p] || ps == null || ps > 20) continue; rows.push([String(r[q]).trim(), String(r[p]).trim(), num(r[c]) || 0, num(r[im]) || 0, Math.round(ps * 10) / 10]); }
+        found.gsc = { rows, name: (found.gsc ? found.gsc.name + ", " : "") + `${file.name} › ${n}` }; continue;
+      }
+      const a = headerRow(aoa, h => { const p = colOf(h, GA_P), s = colOf(h, ["sessions"]); return p >= 0 && s >= 0 ? { p, s } : null; });
+      if (a) {
+        const m = new Map(found.ga4 ? found.ga4.rows : []);
+        for (const r of aoa.slice(a.i + 1)) { if (!r[a.m.p] || /^(total|grand total)/i.test(String(r[a.m.p]))) continue; const k = pathOfUrl(r[a.m.p]); m.set(k, (m.get(k) || 0) + (num(r[a.m.s]) || 0)); }
+        found.ga4 = { rows: [...m.entries()], name: (found.ga4 ? found.ga4.name + ", " : "") + `${file.name} › ${n}` }; continue;
+      }
+      if (aoa.length > 1) notes.push(`${file.name} › ${n}`);
+    }
+  }
+  return { found, notes };
+}
+async function onUpload(files) {
+  const msg = (t, bad) => { $("s-uploads").innerHTML = `<span class="small ${bad ? "src-bad" : "muted"}">${esc(t)}</span>`; };
+  if (!files.length) return;
+  msg("Reading your file…");
+  let res; try { res = await readUploads([...files]); } catch (e) { msg("Couldn't read that file: " + (e.message || e), true); return; }
+  const { found, notes } = res;
+  if (found.lib) {
+    const inv = found.lib.data.inv, ui = inv.cols.indexOf("URL");
+    const hosts = new Map(); inv.rows.forEach(r => { const h = hostOf(r[ui]); if (h) hosts.set(h, (hosts.get(h) || 0) + 1); });
+    const host = [...hosts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (host && host[0] !== siteDomain()) { CFG.domain = host[0]; saveSettings(); $("s-domain").value = CFG.domain; S.site = null; refreshSite(); }
+    const ci = inv.cols.indexOf("Clicks (3 mo)");
+    const rec = { data: found.lib.data, meta: { domain: siteDomain(), builtAt: new Date().toISOString(), mode: ci >= 0 && inv.rows.some(r => r[ci] !== "") ? "gsc" : "moz", sources: [`Uploaded library (${found.lib.name})`] }, loadedAt: new Date().toISOString() };
+    await saveLocal(K.lib(), rec); await loadLocal();
+    S.meta = rec.meta; tcIndex = null; tcInit = false; applyData(rec.data, rec.loadedAt, "upload");
+    renderDataBox(); updateStatus(); renderUploads();
+    toast(`Library loaded: ${fmt(inv.rows.length)} URLs.`); return;
+  }
+  if (!found.gsc && !found.ga4) { msg("No Search Console or GA4 data found. Search Console needs Query, Page, Clicks, Impressions and Position columns; GA4 needs a page path column and Sessions." + (notes.length ? " Sheets checked: " + notes.join(", ") + "." : ""), true); return; }
+  if (found.gsc && !siteDomain()) {
+    const hosts = new Map(); found.gsc.rows.forEach(r => { const h = hostOf(r[1]); if (h) hosts.set(h, (hosts.get(h) || 0) + 1); });
+    const host = [...hosts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (host) { CFG.domain = host[0]; saveSettings(); $("s-domain").value = CFG.domain; refreshSite(); await openLibrary(); }
+  }
+  if (found.gsc) S.up.gsc = found.gsc;
+  if (found.ga4) S.up.ga4 = found.ga4;
+  await saveLocal(K.up(), S.up);
+  renderUploads(); renderCost(); updateStatus();
+  toast("Saved in this browser. Build the library to use it.");
+}
+function renderUploads() {
+  const el = $("s-uploads"); if (!el) return;
+  const u = S.up || {}, parts = [];
+  if (u.gsc) parts.push(`<div class="small"><span class="pill good">Search Console</span> ${fmt(u.gsc.rows.length)} query × page rows (positions 1–20) from ${esc(u.gsc.name)} <button class="btn small" type="button" data-rm="gsc">Remove</button></div>`);
+  if (u.ga4) parts.push(`<div class="small"><span class="pill good">GA4</span> sessions for ${fmt(u.ga4.rows.length)} pages from ${esc(u.ga4.name)} <button class="btn small" type="button" data-rm="ga4">Remove</button></div>`);
+  el.innerHTML = parts.join("") || '<span class="small muted">No file yet. Without one, the library uses Moz data only.</span>';
+  el.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => { delete S.up[b.dataset.rm]; await saveLocal(K.up(), S.up); renderUploads(); renderCost(); });
 }
 
 // ---------- build the library ----------
@@ -879,13 +972,15 @@ async function buildLib() {
       await indexSite(s => say(`Indexing your site: ${fmt(s.crawling ? s.crawling.pages : s.pages)} pages kept so far. The library is built once 300 are in.`), { untilUsable: true });
     }
     const useG = useGoogle();
-    const steps = [useG && CFG.gscSite ? "Search Console" : null, useG && CFG.ga4Property ? "GA4" : null, "Moz ranking keywords"].filter(Boolean).join(", ");
+    const steps = [(useG && CFG.gscSite) || (S.up && S.up.gsc) ? "Search Console" : null, (useG && CFG.ga4Property) || (S.up && S.up.ga4) ? "GA4" : null, "Moz ranking keywords"].filter(Boolean).join(", ");
     tick = setInterval(() => say(`Reading ${steps} and finding pages that compete… ${Math.round((Date.now() - t0) / 1000)}s (usually 1–3 minutes)`), 1000);
+    const up = S.up || {};
     const { library } = await api("library", {
+      gscUpload: up.gsc ? { rows: up.gsc.rows, name: up.gsc.name } : undefined, ga4Upload: up.ga4 ? { rows: up.ga4.rows, name: up.ga4.name } : undefined,
       domain: d, brandTerms: listOf(CFG.brand).length ? listOf(CFG.brand) : [d.split(".")[0]], include: listOf(CFG.sections),
       mozRows: Number(CFG.mozRows) || 1000, volumeLimit: Number(CFG.volumeLimit) || 0,
       gscSite: useG ? CFG.gscSite : "", ga4Property: useG ? CFG.ga4Property || "" : "",
-    });
+    }, { gzip: !!(up.gsc || up.ga4) });
     clearInterval(tick);
     const data = { inv: library.inv, lib: library.lib, ov: library.ov, ku: library.ku };
     const rec = { data, meta: library.meta, loadedAt: library.meta.builtAt };

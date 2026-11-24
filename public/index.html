@@ -359,25 +359,26 @@ a.btn-ghost { text-decoration: none; display: inline-block; }
     <div class="grid2">
       <div class="stack">
         <div class="panel pad stack">
-          <h2><span class="step-n">1</span>Sign in with Google</h2>
-          <p class="small muted" style="margin:0">Search Console and GA4 power the library: every page Google shows for a keyword, with clicks, impressions and sessions. You only see properties your own Google account can access, and your data goes straight to your browser. Nothing is stored on the server.</p>
-          <div id="g-box" class="stack" style="gap:10px"></div>
-          <label class="check"><input type="checkbox" id="s-mozonly"><span>No Google access? Build with Moz data only. Less accurate: Moz shows one ranking page per keyword, so it misses most cannibalization.</span></label>
-        </div>
-        <div class="panel pad stack">
-          <h2><span class="step-n">2</span>Your keys</h2>
+          <h2><span class="step-n">1</span>Your keys</h2>
           <p class="small muted" style="margin:0">Keys stay in this browser and are only sent with your own requests. The server never stores them. Usage is billed to your own Moz and Anthropic accounts.</p>
-          <div class="field"><label for="s-moz">Moz API token (required)</label><input type="password" id="s-moz" autocomplete="off" placeholder="From the Moz API dashboard"><span class="hint">Get one at <a href="https://moz.com/api" target="_blank" rel="noopener">moz.com/api</a>. Adds search volume, difficulty and intent, plus keywords Search Console doesn't show.</span></div>
+          <div class="field"><label for="s-moz">Moz API token (required)</label><input type="password" id="s-moz" autocomplete="off" placeholder="From the Moz API dashboard"><span class="hint">Get one at <a href="https://moz.com/api" target="_blank" rel="noopener">moz.com/api</a>. Used for the keywords your site ranks for, the page that ranks for each, search volume, difficulty and intent.</span></div>
           <div class="field"><label for="s-claude">Claude API key (for reviews)</label><input type="password" id="s-claude" autocomplete="off" placeholder="sk-ant-…"><span class="hint">From the <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Claude Console</a>. Needed for "Ask Claude"; the library and rule-based fixes work without it.</span></div>
           <div class="field"><label for="s-model">Claude model</label><div class="row"><select id="s-model" style="flex:1"><option value="">Load your models first</option></select><button class="btn" type="button" id="s-models">Load models</button></div></div>
           <label class="check"><input type="checkbox" id="s-remember"><span>Remember my keys on this device (otherwise they last until you close the tab)</span></label>
           <div class="row"><button class="btn small" type="button" id="s-forget">Forget my keys</button><span class="small src-bad" id="s-msg"></span></div>
         </div>
+        <div class="panel pad stack">
+          <h2><span class="step-n">2</span>Add your Search Console and GA4 data <span class="pill good" style="vertical-align:middle">Recommended</span></h2>
+          <p class="small muted" style="margin:0">Search Console shows every page that appears for a keyword, with clicks and impressions, so it finds far more cannibalization than Moz alone. GA4 adds sessions per page. Export both into a Google Sheet with two free add-ons, download it as .xlsx and upload it here. Your file is read in this browser and only sent to build your library: it is never stored on the server.</p>
+          <div class="filter-row"><a class="btn" href="/how-to-library.html" target="_blank" rel="noopener">How to build it (5 min)</a><a class="btn" href="/skills/url-library-google-sheets-skill.zip" download>Download the Claude skill</a></div>
+          <div class="field"><label for="s-upload">Upload your file (.xlsx or .csv)</label><input type="file" id="s-upload" accept=".xlsx,.xls,.csv" multiple><span class="hint">A Search Console sheet (Query, Page, Clicks, Impressions, Position), a GA4 sheet (page path, sessions), or both in one workbook. A full library exported from this tool (or your own with the same tabs) also works and opens straight away.</span></div>
+          <div id="s-uploads" class="stack" style="gap:6px"></div>
+        </div>
       </div>
       <div class="stack">
         <div class="panel pad stack">
           <h2><span class="step-n">3</span>Your site</h2>
-          <div class="field"><label for="s-domain">Domain</label><input type="text" id="s-domain" placeholder="example.com"><span class="hint">Filled in from your Search Console property.</span></div>
+          <div class="field"><label for="s-domain">Domain</label><input type="text" id="s-domain" placeholder="example.com"></div>
           <div class="field"><label for="s-brand">Brand terms (optional)</label><input type="text" id="s-brand" placeholder="acme, acme tools"><span class="hint">Comma-separated. Branded searches are left out, since your pages are meant to share those.</span></div>
           <div class="field"><label for="s-sections">Paths to index (optional)</label><input type="text" id="s-sections" placeholder="/blog, /guides, /learn"><span class="hint">Comma-separated. Only these paths are crawled and included in the library. Leave empty to check the whole site.</span></div>
           <div class="field"><label>Index size</label><div id="s-sizes"></div></div>
@@ -385,8 +386,9 @@ a.btn-ghost { text-decoration: none; display: inline-block; }
         </div>
         <div class="panel pad stack">
           <h2><span class="step-n">4</span>Build the library</h2>
-          <div class="field"><label>Extra ranking keywords from Moz</label><div id="s-rows"></div></div>
-          <div class="field"><label for="s-vol">Search volume look-ups for Search Console keywords</label><select id="s-vol"><option value="0">None</option><option value="100">Top 100 cannibalized keywords</option><option value="200">Top 200 cannibalized keywords</option><option value="500">Top 500 cannibalized keywords</option><option value="1000">Top 1,000 cannibalized keywords</option></select><span class="hint">Keywords Moz didn't return get their volume and intent from Moz.</span></div>
+          <div class="field"><label>Ranking keywords to pull from Moz</label><div id="s-rows"></div></div>
+          <div class="field"><label for="s-vol">Search volume look-ups for Search Console keywords</label><select id="s-vol"><option value="0">None</option><option value="100">Top 100 cannibalized keywords</option><option value="200">Top 200 cannibalized keywords</option><option value="500">Top 500 cannibalized keywords</option><option value="1000">Top 1,000 cannibalized keywords</option></select><span class="hint">Only used with an uploaded Search Console file: keywords Moz didn't return get their volume and intent from Moz.</span></div>
+          <div hidden><input type="checkbox" id="s-mozonly" checked><div id="g-box"></div></div>
           <div class="costbox" id="s-cost"></div>
           <div class="row"><button class="btn primary" type="button" id="s-build">Build the library</button><span class="small muted" id="s-build-msg" aria-live="polite"></span></div>
           <div class="field"><label>Saved in this browser</label><div id="s-data" class="stack" style="gap:6px"></div><span class="hint">Your library, Claude reviews and topic checks live in this browser only (IndexedDB). Download the .xlsx to share it. Rebuild monthly to keep it fresh.</span></div>
