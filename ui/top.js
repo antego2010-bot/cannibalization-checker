@@ -30,7 +30,7 @@ const SKEY = "cc:settings";
 function loadSettings() {
   let s = {};
   try { s = JSON.parse(sessionStorage.getItem(SKEY) || localStorage.getItem(SKEY) || "{}"); } catch (e) {}
-  return { moz: "", claude: "", model: "", domain: "", brand: "", exclude: "", sections: "", size: 1000, mozRows: 1000, volumeLimit: 200, gscSite: "", ga4Property: "", remember: false, ...s };
+  return { moz: "", claude: "", model: "", domain: "", brand: "", exclude: "", sections: "", size: 1000, mozRows: 1000, volumeLimit: 200, gscSite: "", ga4Property: "", ga4Skip: false, mozOnly: false, remember: false, ...s };
 }
 let CFG = loadSettings();
 function saveSettings() {

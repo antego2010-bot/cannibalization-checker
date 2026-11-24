@@ -27,7 +27,7 @@ body = rep(body, "<h1>Cannibalization checker tool</h1>", "<h1>Keyword cannibali
 body = rep(body, '<div class="sub">moz.com URL Library · Search Console (last 3 months) + Moz API</div>', '<div class="sub" id="brand-sub"></div>')
 body = rep(body, '<span id="status-text"><span class="dot busy"></span>Loading the library…</span>', '<span id="status-text"><span class="dot busy"></span>Loading…</span>')
 body = rep(body, '<button class="btn-ghost" id="refresh-btn" type="button">Refresh from Google Sheet</button>',
-           '<button class="btn-ghost" id="xlsx-btn" type="button" hidden>Download .xlsx</button>\n      <button class="btn-ghost" id="rebuild-btn" type="button" hidden>Rebuild library</button>')
+           '<a class="btn-ghost" id="g-head" href="/api/google/login" hidden>Sign in with Google</a>\n      <button class="btn-ghost" id="xlsx-btn" type="button" hidden>Download .xlsx</button>\n      <button class="btn-ghost" id="rebuild-btn" type="button" hidden>Rebuild library</button>')
 body = rep(body, '<a href="#topic-check" data-tab="topic-check">Topic check</a>', '<a href="#topic-check" data-tab="topic-check">Topic check</a>\n    <a href="#settings" data-tab="settings">Settings</a>')
 body = re.sub(r'<div id="loading" class="panel skeleton">.*?</span>\n  </div>\n', '<div id="loading" class="panel skeleton">\n    <div class="spinner" aria-hidden="true"></div>\n    <strong>Opening…</strong>\n  </div>\n', body, count=1, flags=re.S)
 body = rep(body, 'Keywords where more than one moz.com URL ranks (Search Console query → page data, Moz fallback).', 'Keywords where more than one of your URLs ranks.')

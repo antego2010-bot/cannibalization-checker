@@ -37,7 +37,7 @@ Reply with only a JSON array: [{"topic": string (exactly as given), "review": st
 function renderBrand() {
   const d = siteDomain();
   $("brand-mark").textContent = d ? (brandName()[0] || "C").toUpperCase() : "C";
-  $("brand-sub").textContent = d ? `${d} · ${S.meta && S.meta.mode === "gsc" ? "Search Console (last 3 months)" : "Moz ranking keywords"}${S.meta && S.meta.sources && S.meta.sources.some(s => /^GA4/.test(s)) ? " + GA4" : ""} + Moz API` : "Bring your own Moz and Claude keys · optional Google Search Console and GA4";
+  $("brand-sub").textContent = d ? `${d} · ${S.meta ? (S.meta.mode === "gsc" ? "Search Console (last 3 months)" : "Moz ranking keywords") + (S.meta.sources && S.meta.sources.some(s => /^GA4/.test(s)) ? " + GA4" : "") : "Search Console + GA4"} + Moz API` : "Search Console + GA4 + Moz API · sign in with your own Google account";
   document.querySelectorAll("[data-site]").forEach(el => el.textContent = d || "your site");
   $("rebuild-btn").hidden = !d; $("xlsx-btn").hidden = !S.data;
 }
@@ -46,12 +46,12 @@ function showEmpty(kind, msg) {
   ROUTES.filter(x => x !== "settings").forEach(x => $("view-" + x).hidden = true);
   if (kind === "loading") { box.innerHTML = `<div class="spinner" aria-hidden="true"></div><strong>Opening your library…</strong>`; return; }
   if (kind === "building") { box.innerHTML = `<div class="spinner" aria-hidden="true"></div><strong>Building the library for ${esc(siteDomain())}</strong><span class="muted small" id="loading-detail">${esc(msg || "")}</span>`; return; }
-  const settingsReady = !!siteDomain() && (!!CFG.moz || S.mock);
+  const settingsReady = !settingsMissing().length;
   box.innerHTML = kind === "error"
     ? `<strong>The library couldn't be built</strong><span class="muted small" style="max-width:640px">${esc(msg)}</span><div class="filter-row" style="justify-content:center"><button class="btn primary" type="button" data-build>Try again</button><a class="btn" href="#settings">Open Settings</a></div>`
     : settingsReady
-      ? `<strong>No library for ${esc(siteDomain())} yet</strong><span class="muted small" style="max-width:640px">Building it indexes your site, pulls the keywords it ranks for from Moz (and Search Console if you connected Google), then finds every keyword where more than one of your pages competes. It takes 2–5 minutes and is saved in this browser.</span><div class="filter-row" style="justify-content:center"><button class="btn primary" type="button" data-build>Build the library</button><a class="btn" href="#settings">Review settings first</a></div>`
-      : `<strong>Start in Settings</strong><span class="muted small" style="max-width:640px">Add your Moz API token and your site's domain. Connecting Google Search Console is optional but gives the most accurate picture: real clicks and impressions for every page that shows for a keyword.</span><div class="filter-row" style="justify-content:center"><a class="btn primary" href="#settings">Open Settings</a></div>`;
+      ? `<strong>No library for ${esc(siteDomain())} yet</strong><span class="muted small" style="max-width:640px">Building it indexes your site, reads Search Console, GA4 and Moz, then finds every keyword where more than one of your pages competes. It takes 2–5 minutes and is saved in this browser.</span><div class="filter-row" style="justify-content:center"><button class="btn primary" type="button" data-build>Build the library</button><a class="btn" href="#settings">Review settings first</a></div>`
+      : `<strong>Start in Settings</strong><span class="muted small" style="max-width:640px">Sign in with Google and pick your Search Console and GA4 properties, then add your Moz API token. You only ever see data your own Google account can access.</span><div class="filter-row" style="justify-content:center"><a class="btn primary" href="#settings">Open Settings</a></div>`;
   box.querySelectorAll("[data-build]").forEach(b => b.onclick = buildLib);
 }
 
@@ -79,7 +79,17 @@ function googleNotice(why) {
 }
 
 // ---------- settings ----------
-function settingsMissing() { return [!CFG.moz && !S.mock && "Moz API token", !siteDomain() && "your site's domain"].filter(Boolean); }
+const googleReady = () => !!(S.google && S.google.connected && CFG.gscSite);
+const useGoogle = () => !CFG.mozOnly && googleReady();
+function settingsMissing() { return [!CFG.mozOnly && !googleReady() && (S.google && S.google.connected ? "a Search Console property" : "Google sign-in"), !CFG.moz && !S.mock && "Moz API token", !siteDomain() && "your site's domain"].filter(Boolean); }
+const domainFromGsc = (u) => String(u || "").replace(/^sc-domain:/, "").replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").toLowerCase();
+function renderHeadGoogle() {
+  const el = $("g-head"), g = S.google; if (!el) return;
+  if (!g || !g.configured) { el.hidden = true; return; }
+  el.hidden = false;
+  if (g.connected) { el.textContent = g.email ? `Google: ${g.email}` : "Google connected"; el.href = "#settings"; }
+  else { el.textContent = "Sign in with Google"; el.href = "/api/google/login"; }
+}
 function updateStatus() {
   const miss = settingsMissing();
   if (S.building) setStatus("busy", "Building the library…");
@@ -90,7 +100,7 @@ function updateStatus() {
 }
 function renderSettings() {
   $("s-moz").value = CFG.moz; $("s-claude").value = CFG.claude; $("s-domain").value = CFG.domain; $("s-brand").value = CFG.brand;
-  $("s-sections").value = CFG.sections || ""; $("s-remember").checked = !!CFG.remember;
+  $("s-sections").value = CFG.sections || ""; $("s-remember").checked = !!CFG.remember; $("s-mozonly").checked = !!CFG.mozOnly;
   const sel = $("s-model");
   if (CFG.model && ![...sel.options].some(o => o.value === CFG.model)) sel.innerHTML = `<option value="${esc(CFG.model)}">${esc(CFG.model)}</option>` + sel.innerHTML;
   sel.value = CFG.model || "";
@@ -133,7 +143,7 @@ function renderRows() {
   renderCost();
 }
 function renderCost() {
-  const g = !!(CFG.gscSite && S.google && S.google.connected);
+  const g = useGoogle();
   const rows = Number(CFG.mozRows) || 1000, vol = g ? Number(CFG.volumeLimit) || 0 : 0;
   $("s-cost").innerHTML = `<b>Estimated cost of one build</b>
     <div class="small">Moz API: up to <b>${fmt(rows + vol * 5)} rows</b> (${fmt(rows)} ranking keywords${g ? ` + search volume for up to ${fmt(vol)} Search Console keywords at up to 5 rows each` : ""}). Your plan's quota is shown in the Moz API dashboard.</div>
@@ -189,28 +199,41 @@ async function refreshGoogle() {
     const d = siteDomain();
     if (!CFG.gscSite && d && g.sites) { const m = g.sites.find(s => s.siteUrl === "sc-domain:" + d) || g.sites.find(s => s.siteUrl.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "") === d); if (m) { CFG.gscSite = m.siteUrl; saveSettings(); } }
     if (CFG.gscSite && g.sites && !g.sites.some(s => s.siteUrl === CFG.gscSite)) { CFG.gscSite = ""; saveSettings(); }
+    if (!CFG.gscSite && g.sites && g.sites.length === 1) { CFG.gscSite = g.sites[0].siteUrl; saveSettings(); }
+    if (CFG.gscSite && !siteDomain()) { CFG.domain = domainFromGsc(CFG.gscSite); saveSettings(); refreshSite(); openLibrary(); }
+    pickGa4();
   }
-  renderGoogle(); renderCost();
+  renderGoogle(); renderCost(); renderHeadGoogle(); updateStatus();
+}
+function pickGa4() {
+  const g = S.google, d = siteDomain(); if (!g || !g.properties || CFG.ga4Property || CFG.ga4Skip || !d) return;
+  const root = d.split(".")[0];
+  const m = g.properties.find(p => p.name.toLowerCase().includes(d)) || g.properties.find(p => p.name.toLowerCase().includes(root)) || (g.properties.length === 1 ? g.properties[0] : null);
+  if (m) { CFG.ga4Property = m.id; saveSettings(); }
 }
 function renderGoogle() {
   const el = $("g-box"), g = S.google;
   if (!g) { el.innerHTML = '<span class="muted small">Checking…</span>'; return; }
   if (g.error) { el.innerHTML = `<span class="src-bad small">${esc(g.error)}</span> <button class="btn small" type="button" id="g-retry">Try again</button>`; $("g-retry").onclick = () => { S.google = null; renderGoogle(); refreshGoogle(); }; return; }
-  if (!g.configured) { el.innerHTML = `<p class="small" style="margin:0"><span class="pill neutral">Not available on this deployment</span> The library uses Moz ranking data. Whoever runs this app can turn on Google sign-in by adding a Google OAuth client (see the README).</p>`; return; }
+  if (!g.configured) { el.innerHTML = `<p class="small" style="margin:0"><span class="pill warn">Google sign-in is being set up</span> Until it's ready, you can build with Moz data only (tick the box below).</p>`; return; }
   if (!g.connected) {
-    el.innerHTML = `<p class="small" style="margin:0">Read-only access to Search Console and Google Analytics. Your Google sign-in is kept in an encrypted cookie in this browser; your Search Console and GA4 data are never stored on the server.</p><div class="filter-row"><a class="btn primary" href="/api/google/login">Connect Google</a></div>`;
+    el.innerHTML = `<div class="filter-row"><a class="btn primary" href="/api/google/login">Sign in with Google</a></div><p class="hint">Read-only access to Search Console and Google Analytics. Your sign-in stays in an encrypted cookie in this browser, and you can disconnect any time.</p>`;
     return;
   }
   const sites = g.sites || [], props = g.properties || [];
   el.innerHTML = `<div class="small">Connected as <b>${esc(g.email || "your Google account")}</b> <button class="btn small" type="button" id="g-logout">Disconnect</button></div>
-    <div class="field"><label for="s-gsc">Search Console property</label><select id="s-gsc"><option value="">Don't use Search Console (Moz only)</option>${sites.map(s => `<option value="${esc(s.siteUrl)}">${esc(s.siteUrl)}</option>`).join("")}</select>
+    <div class="field"><label for="s-gsc">Search Console property</label><select id="s-gsc"><option value="">Choose your property</option>${sites.map(s => `<option value="${esc(s.siteUrl)}">${esc(s.siteUrl)}</option>`).join("")}</select>
       <span class="hint">${g.sitesError ? `<span class="src-bad">${esc(g.sitesError)}</span>` : sites.length ? "Query → page data for the last 3 months: shows every page that appears for a keyword, with clicks and impressions." : "No verified Search Console properties on this account."}</span></div>
-    <div class="field"><label for="s-ga4">GA4 property (optional)</label><select id="s-ga4"><option value="">Don't add GA4 sessions</option>${props.map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.account)} (${esc(p.id)})</option>`).join("")}</select>
+    <div class="field"><label for="s-ga4">GA4 property</label><select id="s-ga4"><option value="">Skip GA4</option>${props.map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.account)} (${esc(p.id)})</option>`).join("")}</select>
       <span class="hint">${g.propertiesError ? `<span class="src-bad">${esc(g.propertiesError)}</span>` : "Adds sessions per page for the last 12 months to the library."}</span></div>`;
   $("s-gsc").value = CFG.gscSite || ""; $("s-ga4").value = CFG.ga4Property || "";
-  $("s-gsc").onchange = () => { CFG.gscSite = $("s-gsc").value; saveSettings(); renderCost(); };
-  $("s-ga4").onchange = () => { CFG.ga4Property = $("s-ga4").value; saveSettings(); };
-  $("g-logout").onclick = async () => { try { await fetch("/api/google/logout", { method: "POST" }); } catch (e) {} CFG.gscSite = ""; CFG.ga4Property = ""; saveSettings(); S.google = null; renderGoogle(); refreshGoogle(); toast("Google disconnected."); };
+  $("s-gsc").onchange = () => {
+    CFG.gscSite = $("s-gsc").value; const d = domainFromGsc(CFG.gscSite);
+    if (d && d !== siteDomain()) { CFG.domain = d; CFG.ga4Property = ""; CFG.ga4Skip = false; $("s-domain").value = d; S.site = null; refreshSite(); openLibrary(); pickGa4(); renderGoogle(); }
+    saveSettings(); renderCost(); updateStatus();
+  };
+  $("s-ga4").onchange = () => { CFG.ga4Property = $("s-ga4").value; CFG.ga4Skip = !CFG.ga4Property; saveSettings(); };
+  $("g-logout").onclick = async () => { try { await fetch("/api/google/logout", { method: "POST" }); } catch (e) {} CFG.gscSite = ""; CFG.ga4Property = ""; CFG.ga4Skip = false; saveSettings(); S.google = null; renderGoogle(); refreshGoogle(); toast("Google disconnected."); };
 }
 
 // ---------- stored library ----------
@@ -230,12 +253,12 @@ function bindSettings() {
     const before = siteDomain();
     CFG.moz = $("s-moz").value.trim(); CFG.claude = $("s-claude").value.trim(); CFG.domain = $("s-domain").value.trim(); CFG.brand = $("s-brand").value.trim();
     CFG.sections = $("s-sections").value.trim(); CFG.model = $("s-model").value; CFG.remember = $("s-remember").checked;
-    CFG.volumeLimit = Number($("s-vol").value) || 0;
+    CFG.volumeLimit = Number($("s-vol").value) || 0; CFG.mozOnly = $("s-mozonly").checked;
     saveSettings();
-    if (siteDomain() !== before) { S.site = null; CFG.gscSite = ""; CFG.ga4Property = ""; saveSettings(); refreshSite(); refreshGoogle(); openLibrary(); }
+    if (siteDomain() !== before) { S.site = null; if (domainFromGsc(CFG.gscSite) !== siteDomain()) { CFG.gscSite = ""; CFG.ga4Property = ""; CFG.ga4Skip = false; } saveSettings(); refreshSite(); refreshGoogle(); openLibrary(); }
     updateStatus(); renderCost();
   };
-  ["s-moz", "s-claude", "s-domain", "s-brand", "s-sections", "s-model", "s-remember", "s-vol"].forEach(id => $(id).addEventListener("change", upd));
+  ["s-moz", "s-claude", "s-domain", "s-brand", "s-sections", "s-model", "s-remember", "s-vol", "s-mozonly"].forEach(id => $(id).addEventListener("change", upd));
   $("s-models").onclick = () => { upd(); loadModels(); };
   $("s-index").onclick = async () => {
     upd(); const s = S.site || {};
@@ -250,7 +273,8 @@ function bindSettings() {
 async function buildLib() {
   if (S.building) return;
   const d = siteDomain();
-  if (!d || (!CFG.moz && !S.mock)) { toast("Add your Moz API token and domain first."); location.hash = "#settings"; return; }
+  const miss = settingsMissing();
+  if (miss.length) { toast("Before building: " + miss.join(", ") + "."); location.hash = "#settings"; return; }
   S.building = true; S.buildError = null; $("s-build").disabled = true; $("rebuild-btn").disabled = true;
   const t0 = Date.now();
   const say = (m) => { S.buildMsg = m; const el = $("loading-detail"); if (el) el.textContent = m; $("s-build-msg").textContent = m; };
@@ -264,13 +288,13 @@ async function buildLib() {
       say("Indexing your site (titles and publish dates for every page)…");
       await indexSite(s => say(`Indexing your site: ${fmt(s.crawling ? s.crawling.pages : s.pages)} pages kept so far. The library is built once 300 are in.`), { untilUsable: true });
     }
-    const useG = !!(S.google && S.google.connected);
+    const useG = useGoogle();
     const steps = [useG && CFG.gscSite ? "Search Console" : null, useG && CFG.ga4Property ? "GA4" : null, "Moz ranking keywords"].filter(Boolean).join(", ");
     tick = setInterval(() => say(`Reading ${steps} and finding pages that compete… ${Math.round((Date.now() - t0) / 1000)}s (usually 1–3 minutes)`), 1000);
     const { library } = await api("library", {
       domain: d, brandTerms: listOf(CFG.brand).length ? listOf(CFG.brand) : [d.split(".")[0]], include: listOf(CFG.sections),
       mozRows: Number(CFG.mozRows) || 1000, volumeLimit: Number(CFG.volumeLimit) || 0,
-      gscSite: useG ? CFG.gscSite || "" : "", ga4Property: useG ? CFG.ga4Property || "" : "",
+      gscSite: useG ? CFG.gscSite : "", ga4Property: useG ? CFG.ga4Property || "" : "",
     });
     clearInterval(tick);
     const data = { inv: library.inv, lib: library.lib, ov: library.ov, ku: library.ku };
