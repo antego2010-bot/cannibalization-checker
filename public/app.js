@@ -680,7 +680,7 @@ function updateStatus() {
 }
 function renderSettings() {
   $("s-moz").value = CFG.moz; $("s-claude").value = CFG.claude; $("s-domain").value = CFG.domain; $("s-brand").value = CFG.brand;
-  $("s-exclude").value = CFG.exclude || ""; $("s-sections").value = CFG.sections || ""; $("s-remember").checked = !!CFG.remember;
+  $("s-sections").value = CFG.sections || ""; $("s-remember").checked = !!CFG.remember;
   const sel = $("s-model");
   if (CFG.model && ![...sel.options].some(o => o.value === CFG.model)) sel.innerHTML = `<option value="${esc(CFG.model)}">${esc(CFG.model)}</option>` + sel.innerHTML;
   sel.value = CFG.model || "";
@@ -819,13 +819,13 @@ function bindSettings() {
   const upd = () => {
     const before = siteDomain();
     CFG.moz = $("s-moz").value.trim(); CFG.claude = $("s-claude").value.trim(); CFG.domain = $("s-domain").value.trim(); CFG.brand = $("s-brand").value.trim();
-    CFG.exclude = $("s-exclude").value.trim(); CFG.sections = $("s-sections").value.trim(); CFG.model = $("s-model").value; CFG.remember = $("s-remember").checked;
+    CFG.sections = $("s-sections").value.trim(); CFG.model = $("s-model").value; CFG.remember = $("s-remember").checked;
     CFG.volumeLimit = Number($("s-vol").value) || 0;
     saveSettings();
     if (siteDomain() !== before) { S.site = null; CFG.gscSite = ""; CFG.ga4Property = ""; saveSettings(); refreshSite(); refreshGoogle(); openLibrary(); }
     updateStatus(); renderCost();
   };
-  ["s-moz", "s-claude", "s-domain", "s-brand", "s-exclude", "s-sections", "s-model", "s-remember", "s-vol"].forEach(id => $(id).addEventListener("change", upd));
+  ["s-moz", "s-claude", "s-domain", "s-brand", "s-sections", "s-model", "s-remember", "s-vol"].forEach(id => $(id).addEventListener("change", upd));
   $("s-models").onclick = () => { upd(); loadModels(); };
   $("s-index").onclick = async () => {
     upd(); const s = S.site || {};
@@ -858,7 +858,7 @@ async function buildLib() {
     const steps = [useG && CFG.gscSite ? "Search Console" : null, useG && CFG.ga4Property ? "GA4" : null, "Moz ranking keywords"].filter(Boolean).join(", ");
     tick = setInterval(() => say(`Reading ${steps} and finding pages that compete… ${Math.round((Date.now() - t0) / 1000)}s (usually 1–3 minutes)`), 1000);
     const { library } = await api("library", {
-      domain: d, brandTerms: listOf(CFG.brand).length ? listOf(CFG.brand) : [d.split(".")[0]], exclude: listOf(CFG.exclude),
+      domain: d, brandTerms: listOf(CFG.brand).length ? listOf(CFG.brand) : [d.split(".")[0]], include: listOf(CFG.sections),
       mozRows: Number(CFG.mozRows) || 1000, volumeLimit: Number(CFG.volumeLimit) || 0,
       gscSite: useG ? CFG.gscSite || "" : "", ga4Property: useG ? CFG.ga4Property || "" : "",
     });
