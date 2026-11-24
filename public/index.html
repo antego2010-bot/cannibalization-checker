@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyword cannibalization checker</title>
+<meta name="description" content="Find pages on your site that compete for the same keywords, with Moz and Google Search Console data, and get Claude's fix for each one.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Layout: sticky header + tab bar, one working pane per tab: summary, filters, then results. */
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --ink: #0e1a33;
+  --muted: #5b6782;
+  --line: #dfe4ee;
+  --accent: #1f5fd6;
+  --accent-soft: #e6eefc;
+  --navy: #0b1a3a;
+  --good: #1b7f55; --good-soft: #e3f4ec;
+  --warn: #a86a00; --warn-soft: #fbf0d9;
+  --bad: #c23b3b; --bad-soft: #fbe6e6;
+  --claude: #b4532a; --claude-soft: #f8eae2;
+  --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c1220; --surface: #141c2e; --ink: #e7ecf6; --muted: #9aa6c0; --line: #27324a;
+    --accent: #6c9cff; --accent-soft: #1b2a4d; --navy: #050a16;
+    --good: #5fd19e; --good-soft: #143326; --warn: #f0b952; --warn-soft: #3a2c10;
+    --bad: #ff8a8a; --bad-soft: #3d1a1d; --claude: #f0a07a; --claude-soft: #3a2218;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c1220; --surface: #141c2e; --ink: #e7ecf6; --muted: #9aa6c0; --line: #27324a;
+  --accent: #6c9cff; --accent-soft: #1b2a4d; --navy: #050a16;
+  --good: #5fd19e; --good-soft: #143326; --warn: #f0b952; --warn-soft: #3a2c10;
+  --bad: #ff8a8a; --bad-soft: #3d1a1d; --claude: #f0a07a; --claude-soft: #3a2218;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+.num { font-variant-numeric: tabular-nums; }
+
+header.top { background: var(--navy); color: #fff; padding: 14px 20px 0; position: sticky; top: 0; z-index: 20; }
+.top-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.brand { display: flex; gap: 12px; align-items: center; }
+.mark { width: 34px; height: 34px; border-radius: 8px; background: #1f5fd6; display: grid; place-items: center; font-family: var(--font-display); font-weight: 800; font-size: 15px; }
+.brand h1 { font-size: 19px; font-weight: 700; }
+.brand .sub { color: #a9b8d8; font-size: 12.5px; }
+.data-status { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: #c9d4ec; }
+.data-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #8a94a8; display: inline-block; margin-right: 6px; }
+.data-status .dot.ok { background: #4cd38f; }
+.data-status .dot.busy { background: #f0b952; }
+.data-status .dot.err { background: #ff7b7b; }
+.btn-ghost[aria-pressed="true"], .btn-ghost[aria-pressed="true"]:hover { background: #f0b952; border-color: #f0b952; color: #0b1a3a; }
+.demo-pill { background: #f0b952; color: #0b1a3a; font-weight: 600; padding: 3px 10px; border-radius: 999px; font-size: 12px; }
+.btn-ghost { background: transparent; border: 1px solid #3a4c78; color: #fff; padding: 6px 12px; border-radius: 7px; font-weight: 500; }
+.btn-ghost:hover { background: #18294f; }
+nav.tabs { display: flex; gap: 4px; margin-top: 12px; overflow-x: auto; }
+nav.tabs a { color: #c9d4ec; padding: 10px 16px; border-radius: 8px 8px 0 0; font-weight: 600; white-space: nowrap; }
+nav.tabs a:hover { text-decoration: none; background: #18294f; }
+nav.tabs a[aria-current="page"] { background: var(--bg); color: var(--ink); }
+nav.tabs .count { font-weight: 500; opacity: .7; margin-left: 4px; font-size: 12px; }
+
+main { padding: 18px 20px 40px; max-width: 1500px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+main > section, main > div { min-width: 0; }
+section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.check-grid > * { min-width: 0; }
+section[hidden] { display: none; }
+.notice { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.notice.err { border-color: var(--bad); background: var(--bad-soft); }
+.notice.warn { border-color: var(--warn); background: var(--warn-soft); }
+.notice p { margin: 0; flex: 1 1 300px; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.stat .k { font-size: 12px; color: var(--muted); font-weight: 500; }
+.stat .v { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
+.stat .v small { font-family: var(--font-body); font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.filters { padding: 12px; display: grid; gap: 10px; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.field { display: grid; gap: 4px; min-width: 150px; flex: 1 1 160px; }
+.field.wide { flex: 3 1 280px; }
+.field label { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+input[type="search"], input[type="text"], input[type="number"], select, textarea {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; width: 100%; min-width: 0;
+}
+textarea { resize: vertical; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: var(--surface); padding: 5px 11px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip .c { opacity: .7; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 7px 13px; border-radius: 7px; font-weight: 600; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.claude { background: var(--claude); border-color: var(--claude); color: #fff; }
+.btn.small { padding: 4px 10px; font-size: 12.5px; }
+.btn:disabled { opacity: .55; cursor: default; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.toolbar .meta { color: var(--muted); font-size: 13px; }
+.more { border-top: 1px dashed var(--line); padding-top: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.minmax { display: flex; gap: 6px; }
+details.cols summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.colgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; padding: 8px 0; font-size: 13px; }
+
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; white-space: nowrap; position: sticky; top: 0; background: var(--surface); }
+th button { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; }
+th button:hover { color: var(--accent); }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr.row:hover { background: var(--accent-soft); cursor: pointer; }
+.url-cell { min-width: 260px; max-width: 420px; }
+.url-cell .t { font-weight: 600; display: block; }
+.url-cell .u { font-size: 12px; color: var(--muted); word-break: break-all; }
+.clip { max-width: 260px; }
+tr.detail td { background: var(--bg); }
+.kv { display: grid; grid-template-columns: minmax(160px, 220px) 1fr; gap: 4px 16px; font-size: 13px; }
+.kv dt { color: var(--muted); font-weight: 500; }
+.kv dd { margin: 0; white-space: pre-wrap; word-break: break-word; }
+
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pill.high, .pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.medium, .pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.low, .pill.good { background: var(--good-soft); color: var(--good); }
+.pill.neutral { background: var(--accent-soft); color: var(--accent); }
+.pill.claude { background: var(--claude-soft); color: var(--claude); }
+.pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 10px 12px; }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); padding: 7px 14px; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+.kw-list { display: grid; gap: 12px; padding: 12px; }
+.kw { border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px; background: var(--surface); }
+.kw.sev-high { border-left-color: var(--bad); }
+.kw.sev-medium { border-left-color: var(--warn); }
+.kw.sev-low { border-left-color: var(--good); }
+.kw-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; justify-content: space-between; }
+.kw-head h3 { font-size: 16px; font-weight: 700; }
+.kw-head .tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12.5px; }
+.kw table td { font-size: 13px; }
+.rec { display: grid; gap: 4px; min-width: 280px; }
+.rec .src { font-size: 11px; color: var(--muted); }
+.rec.claude-rec { border-left: 3px solid var(--claude); padding-left: 8px; }
+.kw-summary { padding: 0 12px 10px; color: var(--ink); font-size: 13px; }
+.kw-summary b { color: var(--claude); }
+.role { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+.role.main { color: var(--good); }
+.role.cann { color: var(--bad); }
+
+.check-grid { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 14px; align-items: start; }
+@media (max-width: 860px) { .check-grid { grid-template-columns: 1fr; } }
+.check-form { padding: 14px; display: grid; gap: 10px; }
+.verdict { padding: 14px; border-radius: 10px; border: 1px solid var(--line); display: grid; gap: 6px; }
+.verdict.v-exists { background: var(--bad-soft); border-color: var(--bad); }
+.verdict.v-partial { background: var(--warn-soft); border-color: var(--warn); }
+.verdict.v-gap { background: var(--good-soft); border-color: var(--good); }
+.verdict.v-claude { background: var(--claude-soft); border-color: var(--claude); }
+.verdict h2 { font-size: 18px; }
+.verdict .label { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.match { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.match:last-child { border-bottom: 0; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; width: 90px; margin-top: 6px; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.sub-h { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.sub-h h3 { font-size: 14px; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; }
+.empty { padding: 24px; text-align: center; color: var(--muted); }
+.skeleton { padding: 28px; display: grid; gap: 8px; place-items: center; text-align: center; }
+.spinner { width: 22px; height: 22px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+[hidden] { display: none !important; }
+.toast { position: fixed; bottom: 16px; right: 16px; background: var(--navy); color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 13px; z-index: 50; }
+@media (max-width: 520px) {
+  header.top, main { padding-left: 16px; padding-right: 16px; }
+  .kv { grid-template-columns: 1fr; }
+}
+/* ---- Vercel app additions: settings, Google, cost ---- */
+input[type="password"] { font: inherit; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 7px; padding: 7px 10px; width: 100%; }
+a.btn { display: inline-block; text-decoration: none; color: inherit; }
+a.btn.primary { color: #fff; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 960px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+.pad { padding: 16px; }
+.stack { display: grid; gap: 12px; align-content: start; }
+.stack h2 { font-size: 17px; margin: 0; }
+.field .hint, p.hint { font-size: 12px; color: var(--muted); margin: 0; }
+#view-settings .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+label.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+label.check input { margin-top: 3px; }
+table.mini { font-size: 12.5px; width: 100%; }
+table.mini th, table.mini td { padding: 6px 8px; }
+.src-bad { color: var(--bad); font-weight: 600; }
+.progress { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.progress .spinner { width: 16px; height: 16px; border-width: 2px; }
+.costbox { border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 10px 12px; display: grid; gap: 4px; font-size: 13px; }
+.step-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; margin-right: 6px; }
+footer.foot { max-width: 1500px; margin: 0 auto; padding: 0 20px 28px; }
+footer.foot a { color: inherit; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <div class="brand">
+      <div class="mark" aria-hidden="true" id="brand-mark">C</div>
+      <div>
+        <h1>Keyword cannibalization checker</h1>
+        <div class="sub" id="brand-sub"></div>
+      </div>
+    </div>
+    <div class="data-status">
+      <span id="status-text"><span class="dot busy"></span>Loading…</span>
+      <span class="demo-pill" id="demo-pill" hidden>Demo mode: clicks &amp; impressions hidden</span>
+      <button class="btn-ghost" id="demo-btn" type="button" aria-pressed="false" title="Hide clicks and impressions for screen recordings">Demo mode</button>
+      <button class="btn-ghost" id="xlsx-btn" type="button" hidden>Download .xlsx</button>
+      <button class="btn-ghost" id="rebuild-btn" type="button" hidden>Rebuild library</button>
+    </div>
+  </div>
+  <nav class="tabs" aria-label="Views">
+    <a href="#library" data-tab="library">Library<span class="count" id="count-library"></span></a>
+    <a href="#cannibalized" data-tab="cannibalized">Cannibalized<span class="count" id="count-cannibalized"></span></a>
+    <a href="#topic-check" data-tab="topic-check">Topic check</a>
+    <a href="#settings" data-tab="settings">Settings</a>
+  </nav>
+</header>
+
+<main>
+  <div id="page-notice" hidden></div>
+
+  <div id="loading" class="panel skeleton">
+    <div class="spinner" aria-hidden="true"></div>
+    <strong>Opening…</strong>
+  </div>
+
+  <!-- LIBRARY -->
+  <section id="view-library" hidden>
+    <div class="stats" id="lib-stats"></div>
+    <div class="panel">
+      <div class="filters">
+        <div class="chips" id="lib-sections" role="group" aria-label="Section"></div>
+        <div class="filter-row">
+          <div class="field wide"><label for="lib-q">Search URL, title, topic or keyword</label><input type="search" id="lib-q" placeholder="e.g. domain authority, /learn/seo"></div>
+          <div class="field"><label for="lib-cluster">Topic cluster</label><select id="lib-cluster"></select></div>
+          <div class="field"><label for="lib-status">Ranking status</label><select id="lib-status"></select></div>
+          <div class="field"><label for="lib-overlap">Overlap type</label><select id="lib-overlap"></select></div>
+          <div class="field"><label for="lib-intent">Intent</label><select id="lib-intent"></select></div>
+        </div>
+        <div class="filter-row">
+          <button class="btn small" type="button" id="lib-more-btn" aria-expanded="false">More filters (every column)</button>
+          <button class="btn small" type="button" id="lib-reset">Clear filters</button>
+        </div>
+        <div class="more" id="lib-more" hidden></div>
+      </div>
+      <div class="toolbar">
+        <span class="meta" id="lib-meta"></span>
+        <div class="filter-row">
+          <details class="cols"><summary>Columns</summary><div class="colgrid" id="lib-cols"></div></details>
+          <button class="btn small" type="button" id="lib-copy">Copy filtered rows (TSV)</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="lib-table"></table></div>
+      <div class="pager" id="lib-pager"></div>
+    </div>
+  </section>
+
+  <!-- CANNIBALIZED -->
+  <section id="view-cannibalized" hidden>
+    <div class="stats" id="cn-stats"></div>
+    <div class="panel">
+      <div class="filters">
+        <div class="filter-row">
+          <div class="seg" role="group" aria-label="Group by">
+            <button type="button" id="cn-mode-kw" aria-pressed="true">By keyword</button>
+            <button type="button" id="cn-mode-topic" aria-pressed="false">By topic</button>
+          </div>
+          <span class="muted small" id="cn-mode-help">Keywords where more than one of your URLs ranks.</span>
+        </div>
+        <div id="cn-kw-filters" class="filter-row">
+          <div class="field wide"><label for="cn-q">Search keyword or URL</label><input type="search" id="cn-q" placeholder="e.g. backlinks, /blog/"></div>
+          <div class="field"><label for="cn-sev">Severity</label><select id="cn-sev"></select></div>
+          <div class="field"><label for="cn-section">Section</label><select id="cn-section"></select></div>
+          <div class="field"><label for="cn-cluster">Topic cluster</label><select id="cn-cluster"></select></div>
+          <div class="field"><label for="cn-review">Claude review</label><select id="cn-review"><option value="">Any</option><option value="yes">Reviewed</option><option value="no">Not reviewed yet</option></select></div>
+          <div class="field"><label for="cn-minvol">Min. search volume</label><input type="number" id="cn-minvol" min="0" step="10" placeholder="0"></div>
+          <div class="field"><label for="cn-sort">Sort</label><select id="cn-sort">
+            <option value="vol">Search volume</option><option value="impr">Impressions at stake</option><option value="sev">Severity</option><option value="urls">Most competing URLs</option><option value="kw">Keyword A–Z</option>
+          </select></div>
+        </div>
+        <div id="cn-topic-filters" class="filter-row" hidden>
+          <div class="field wide"><label for="ct-q">Search topic or URL</label><input type="search" id="ct-q"></div>
+          <div class="field"><label for="ct-cluster">Topic cluster</label><select id="ct-cluster"></select></div>
+          <div class="field"><label for="ct-ev">Ranking cannibalization evidence</label><select id="ct-ev"><option value="">Any</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+          <div class="field"><label for="ct-sort">Sort</label><select id="ct-sort"><option value="impr">Impressions</option><option value="clicks">Clicks</option><option value="pages">Pages in group</option><option value="topic">Topic A–Z</option></select></div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <span class="meta" id="cn-meta"></span>
+        <div class="filter-row" id="cn-actions">
+          <button class="btn small claude" type="button" id="cn-ask-page">Ask Claude to review this page of keywords</button>
+          <button class="btn small" type="button" id="cn-stop" hidden>Stop</button>
+          <span class="small muted" id="cn-progress" aria-live="polite"></span>
+        </div>
+      </div>
+      <div id="cn-body"></div>
+      <div class="pager" id="cn-pager"></div>
+    </div>
+  </section>
+
+  <!-- TOPIC CHECK -->
+  <section id="view-topic-check" hidden>
+    <div class="check-grid">
+      <div class="panel">
+        <form class="check-form" id="tc-form">
+          <h2 style="font-size:17px">Does <span data-site>your site</span> already cover this?</h2>
+          <div class="field"><label for="tc-topic">Topic or working title</label><textarea id="tc-topic" rows="3" placeholder="e.g. How to fix keyword cannibalization"></textarea></div>
+          <div class="filter-row">
+            <button class="btn primary" type="submit">Check the library</button>
+            <button class="btn claude" type="button" id="tc-ask" disabled>Ask Claude for a verdict</button>
+          </div>
+          <p class="small muted" style="margin:0">Matching runs instantly against every URL and ranking keyword in the library. Claude then weighs the closest pages and recommends write, refresh, merge or differentiate.</p>
+        </form>
+        <div class="sub-h"><h3>Recent checks</h3><span class="small muted">Saved in this browser</span></div>
+        <div id="tc-history"><div class="empty small">No saved checks yet.</div></div>
+      </div>
+      <div class="panel">
+        <div style="padding:12px" id="tc-verdicts"></div>
+        <div class="sub-h"><h3>Closest existing pages</h3><span class="small muted" id="tc-count"></span></div>
+        <div id="tc-pages"></div>
+        <div class="sub-h"><h3>Ranking keywords that match</h3><span class="small muted" id="tc-kwcount"></span></div>
+        <div id="tc-kws"></div>
+      </div>
+    </div>
+  </section>
+  <!-- SETTINGS -->
+  <section id="view-settings" hidden>
+    <div class="grid2">
+      <div class="stack">
+        <div class="panel pad stack">
+          <h2><span class="step-n">1</span>Your keys</h2>
+          <p class="small muted" style="margin:0">Keys stay in this browser and are only sent with your own requests. The server never stores them. Usage is billed to your own Moz and Anthropic accounts.</p>
+          <div class="field"><label for="s-moz">Moz API token (required)</label><input type="password" id="s-moz" autocomplete="off" placeholder="From the Moz API dashboard"><span class="hint">Get one at <a href="https://moz.com/api" target="_blank" rel="noopener">moz.com/api</a>. Used for the keywords your site ranks for, search volume and intent.</span></div>
+          <div class="field"><label for="s-claude">Claude API key (for reviews)</label><input type="password" id="s-claude" autocomplete="off" placeholder="sk-ant-…"><span class="hint">From the <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Claude Console</a>. Needed for "Ask Claude"; the library and rule-based fixes work without it.</span></div>
+          <div class="field"><label for="s-model">Claude model</label><div class="row"><select id="s-model" style="flex:1"><option value="">Load your models first</option></select><button class="btn" type="button" id="s-models">Load models</button></div></div>
+          <label class="check"><input type="checkbox" id="s-remember"><span>Remember my keys on this device (otherwise they last until you close the tab)</span></label>
+          <div class="row"><button class="btn small" type="button" id="s-forget">Forget my keys</button><span class="small src-bad" id="s-msg"></span></div>
+        </div>
+        <div class="panel pad stack">
+          <h2><span class="step-n">2</span>Your site</h2>
+          <div class="field"><label for="s-domain">Domain</label><input type="text" id="s-domain" placeholder="example.com"></div>
+          <div class="field"><label for="s-brand">Brand terms (optional)</label><input type="text" id="s-brand" placeholder="acme, acme tools"><span class="hint">Comma-separated. Branded searches are left out, since your pages are meant to share those.</span></div>
+          <div class="field"><label for="s-exclude">Paths to leave out (optional)</label><input type="text" id="s-exclude" placeholder="/tag, /author, /page"><span class="hint">Comma-separated path prefixes, e.g. tag archives or community pages.</span></div>
+          <div class="field"><label>Index size</label><div id="s-sizes"></div></div>
+          <div class="field"><label for="s-sections">Sections to index (optional)</label><input type="text" id="s-sections" placeholder="/blog, /guides, /learn"><span class="hint">Leave empty to index the whole site.</span></div>
+          <div class="field"><label>Site index</label><div id="s-site" class="stack" style="gap:6px"></div><div class="row"><button class="btn" type="button" id="s-index" hidden>Index my site</button><span class="small src-bad" id="s-msg2"></span></div><span class="hint">Gives the library each page's title and publish date. Shared by everyone who checks this domain and reused for 30 days.</span></div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="panel pad stack">
+          <h2><span class="step-n">3</span>Connect Google (optional, recommended)</h2>
+          <p class="small muted" style="margin:0">Moz shows one ranking page per keyword. Search Console shows every page Google tested for a keyword, with clicks and impressions, so it catches far more cannibalization. GA4 adds sessions per page.</p>
+          <div id="g-box" class="stack" style="gap:10px"></div>
+        </div>
+        <div class="panel pad stack">
+          <h2><span class="step-n">4</span>Build the library</h2>
+          <div class="field"><label>Keywords to pull from Moz</label><div id="s-rows"></div></div>
+          <div class="field"><label for="s-vol">Search volume look-ups for Search Console keywords</label><select id="s-vol"><option value="0">None</option><option value="100">Top 100 cannibalized keywords</option><option value="200">Top 200 cannibalized keywords</option><option value="500">Top 500 cannibalized keywords</option><option value="1000">Top 1,000 cannibalized keywords</option></select><span class="hint">Only used with Search Console: keywords Moz didn't return get their volume and intent from Moz.</span></div>
+          <div class="costbox" id="s-cost"></div>
+          <div class="row"><button class="btn primary" type="button" id="s-build">Build the library</button><span class="small muted" id="s-build-msg" aria-live="polite"></span></div>
+          <div class="field"><label>Saved in this browser</label><div id="s-data" class="stack" style="gap:6px"></div><span class="hint">Your library, Claude reviews and topic checks live in this browser only (IndexedDB). Download the .xlsx to share it. Rebuild monthly to keep it fresh.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" hidden></div>
+<footer class="foot small muted">Keys and libraries stay in your browser. <a href="/privacy.html">Privacy</a> · Built with the Moz API and Claude.</footer>
+<script src="/app.js"></script>
+</body>
+</html>
