@@ -50,6 +50,8 @@ mid = rep(mid, '''  const age = (Date.now() - new Date(loadedAt)) / 864e5;
 mid = rep(mid, '''(/(https:\\/\\/moz\\.com\\S*) \\(#(\\d+)\\)/g)''', '''(/(https?:\\/\\/\\S+) \\(#(\\d+)\\)/g)''')
 
 # rule-based recs: generic hubs + Moz-only wording
+mid = rep(mid, '''  const secM = im["Section"] || "", secC = ic["Section"] || "";''', '''  const secM = im["Section"] || "", secC = ic["Section"] || "";
+  if (u.pos == null && u.clicks == null) return { action: "Retarget or merge", cls: "warn", text: `Its title and URL target ${kw}, but ${short(main.url)} is the page that ranks${main.pos != null ? ` (#${fmt(main.pos)})` : ""}. Give this page its own angle in the title and H1 and link to ${short(main.url)} with ${kw} as the anchor, or merge it in if it adds little.` };''')
 mid = rep(mid, 'const hubs = ["Learn", "BGuide", "Product"];', 'const hubs = ["Learn", "Guide", "Product", "Resources", "Docs", "Academy"];')
 mid = rep(mid, 'return { action: "Keep as primary", cls: "good", text: "Most clicks for this keyword. Keep it as', 'return { action: "Keep as primary", cls: "good", text: (u.clicks != null ? "Most clicks" : "Best position") + " for this keyword. Keep it as')
 mid = rep(mid, 'text: `Weaker match (#${fmt(u.pos)}, ${fmt(u.clicks)} clicks).', 'text: `Weaker match (#${fmt(u.pos)}${u.clicks != null ? `, ${fmt(u.clicks)} clicks` : ""}).')
@@ -82,7 +84,7 @@ mid = rep(mid, '''  $("cn-ask-page").onclick = () => reviewBatch(S.cn.visible ||
 mid = rep(mid, '''  $("cn-kw-filters").hidden = topic; $("cn-topic-filters").hidden = !topic; $("cn-actions").hidden = topic;
   $("cn-mode-help").textContent = topic ? "Groups of pages that cover the same topic, with Claude's review of each group." : "Keywords where more than one moz.com URL ranks (Search Console query → page data, Moz fallback).";''', '''  $("cn-kw-filters").hidden = topic; $("cn-topic-filters").hidden = !topic;
   $("cn-ask-page").textContent = topic ? "Ask Claude to review this page of topic groups" : "Ask Claude to review this page of keywords";
-  $("cn-mode-help").textContent = topic ? "Groups of pages that cover the same topic, with Claude's review of each group." : (S.meta && S.meta.mode === "gsc" ? "Keywords where more than one of your URLs gets real impressions (Search Console query → page data, Moz for the rest)." : "Keywords where more than one of your URLs ranks (Moz ranking data; connect Search Console in Settings for the full picture).");''')
+  $("cn-mode-help").textContent = topic ? "Groups of pages that cover the same topic, with Claude's review of each group." : (S.meta && S.meta.mode === "gsc" ? "Keywords where more than one of your URLs gets real impressions (Search Console query → page data, Moz for the rest)." : "Keywords where more than one of your URLs competes: close keyword variants ranking different pages (Moz), and pages whose title and URL target a keyword another page ranks for.");''')
 mid = rep(mid, '''  $("cn-ask-page").title = SAMPLE ? "" : "Asking Claude isn't available in this view";''', '''  $("cn-ask-page").title = SAMPLE ? "" : "Add your Claude API key and model in Settings";''')
 mid = rep(mid, '''  const slice = list.slice(S.cn.tpage * PAGE_LIB, (S.cn.tpage + 1) * PAGE_LIB);
   $("cn-meta").textContent = `${list.length.toLocaleString()} topic groups`;''', '''  const slice = list.slice(S.cn.tpage * PAGE_LIB, (S.cn.tpage + 1) * PAGE_LIB);

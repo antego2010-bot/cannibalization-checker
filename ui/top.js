@@ -30,7 +30,7 @@ const SKEY = "cc:settings";
 function loadSettings() {
   let s = {};
   try { s = JSON.parse(sessionStorage.getItem(SKEY) || localStorage.getItem(SKEY) || "{}"); } catch (e) {}
-  return { moz: "", claude: "", model: "", domain: "", brand: "", exclude: "", sections: "", size: 1000, mozRows: 1000, volumeLimit: 200, gscSite: "", ga4Property: "", ga4Skip: false, mozOnly: false, remember: false, ...s };
+  return { moz: "", claude: "", model: "", domain: "", brand: "", exclude: "", sections: "", size: 1000, mozRows: 1000, volumeLimit: 200, gscSite: "", ga4Property: "", ga4Skip: false, mozOnly: false, remember: false, ...s, mozOnly: true };
 }
 let CFG = loadSettings();
 function saveSettings() {
@@ -51,7 +51,13 @@ async function api(path, payload, opts = {}) {
   const headers = { "content-type": "application/json" };
   if (CFG.moz) headers["x-moz-token"] = CFG.moz;
   if (CFG.claude) headers["x-claude-key"] = CFG.claude;
-  const res = await fetch("/api/" + path, { method: payload === undefined ? "GET" : "POST", headers, body: payload === undefined ? undefined : JSON.stringify(payload), signal: opts.signal, credentials: "same-origin" });
+  let reqBody = payload === undefined ? undefined : JSON.stringify(payload);
+  if (reqBody && opts.gzip) {
+    reqBody = await new Response(new Blob([reqBody]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+    if (reqBody.byteLength > 4_300_000) throw new ApiError("Your Search Console file is too big to send in one go (over 4 MB compressed). Export a shorter date range or fewer rows, then upload it again.", "too_large", 413);
+    headers["content-type"] = "application/octet-stream"; headers["x-body-encoding"] = "gzip";
+  }
+  const res = await fetch("/api/" + path, { method: payload === undefined ? "GET" : "POST", headers, body: reqBody, signal: opts.signal, credentials: "same-origin" });
   if (res.ok && res.headers.get("x-library-encoding") === "gzip") return await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).json();
   let data = null; try { data = await res.json(); } catch (e) {}
   if (!res.ok) { const er = (data && data.error) || {}; throw new ApiError(er.message || `Request failed (${res.status})`, er.code || "http_" + res.status, res.status); }
@@ -65,7 +71,7 @@ const IDB = (() => {
   const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const t = db.transaction("kv", mode); const req = fn(t.objectStore("kv")); t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); };
   return { get: (k) => tx("readonly", s => s.get(k)).catch(() => null), set: (k, v) => tx("readwrite", s => s.put(v, k)), del: (k) => tx("readwrite", s => s.delete(k)).catch(() => null) };
 })();
-const K = { lib: () => "lib:" + siteDomain(), reviews: () => "reviews:" + siteDomain(), checks: () => "checks:" + siteDomain(), topics: () => "topicReviews:" + siteDomain() };
+const K = { up: () => "upload:" + siteDomain(), lib: () => "lib:" + siteDomain(), reviews: () => "reviews:" + siteDomain(), checks: () => "checks:" + siteDomain(), topics: () => "topicReviews:" + siteDomain() };
 
 // ---------- state ----------
 const S = {
@@ -78,7 +84,7 @@ const S = {
   checks: [],
   lib: { section: "", q: "", cluster: "", status: "", overlap: "", intent: "", col: {}, sort: { key: "Clicks (3 mo)", dir: -1 }, page: 0, hidden: new Set(), open: null },
   cn: { mode: "kw", page: 0, tpage: 0 },
-  readOnly: false, site: null, google: null, building: false,
+  readOnly: false, site: null, google: null, building: false, up: {},
 };
 // Claude, through this app's server with the user's own key. Same shape the artifact used (SAMPLE.json).
 const CLAUDE = { json: async (prompt, opts = {}) => (await api("claude", { prompt, model: CFG.model }, { signal: opts.signal })).json };
@@ -96,7 +102,8 @@ function statusLine() {
 }
 function saveLocal(key, value) { return IDB.set(key, value).catch(() => toast("Couldn't save in this browser (storage full or private mode).")); }
 async function loadLocal() {
-  const [rv, ch, tp] = await Promise.all([IDB.get(K.reviews()), IDB.get(K.checks()), IDB.get(K.topics())]);
+  const [rv, ch, tp, up] = await Promise.all([IDB.get(K.reviews()), IDB.get(K.checks()), IDB.get(K.topics()), IDB.get(K.up())]);
+  S.up = up && typeof up === "object" ? up : {};
   S.reviews = new Map((rv || []).map(v => [docId(v.keyword), v]));
   S.checks = Array.isArray(ch) ? ch : [];
   S.topicReviews = tp && typeof tp === "object" ? tp : {};
