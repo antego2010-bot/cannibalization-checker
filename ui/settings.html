@@ -15,9 +15,8 @@
           <h2><span class="step-n">2</span>Your site</h2>
           <div class="field"><label for="s-domain">Domain</label><input type="text" id="s-domain" placeholder="example.com"></div>
           <div class="field"><label for="s-brand">Brand terms (optional)</label><input type="text" id="s-brand" placeholder="acme, acme tools"><span class="hint">Comma-separated. Branded searches are left out, since your pages are meant to share those.</span></div>
-          <div class="field"><label for="s-exclude">Paths to leave out (optional)</label><input type="text" id="s-exclude" placeholder="/tag, /author, /page"><span class="hint">Comma-separated path prefixes, e.g. tag archives or community pages.</span></div>
           <div class="field"><label>Index size</label><div id="s-sizes"></div></div>
-          <div class="field"><label for="s-sections">Sections to index (optional)</label><input type="text" id="s-sections" placeholder="/blog, /guides, /learn"><span class="hint">Leave empty to index the whole site.</span></div>
+          <div class="field"><label for="s-sections">Paths to index (optional)</label><input type="text" id="s-sections" placeholder="/blog, /guides, /learn"><span class="hint">Comma-separated. Only these paths are crawled and included in the library. Leave empty to check the whole site.</span></div>
           <div class="field"><label>Site index</label><div id="s-site" class="stack" style="gap:6px"></div><div class="row"><button class="btn" type="button" id="s-index" hidden>Index my site</button><span class="small src-bad" id="s-msg2"></span></div><span class="hint">Gives the library each page's title and publish date. Shared by everyone who checks this domain and reused for 30 days.</span></div>
         </div>
       </div>
