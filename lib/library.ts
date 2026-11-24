@@ -42,7 +42,7 @@ function cleanTitle(t: string, brandTerms: string[]) {
 const statusOf = (pos: number | null) => pos == null ? "Not ranking (top 20)" : pos <= 3 ? "Top 3" : pos <= 10 ? "Page 1" : "Page 2";
 
 export type BuildInput = {
-  domain: string; brandTerms: string[]; pages: IndexPage[]; excludePrefixes: string[];
+  domain: string; brandTerms: string[]; pages: IndexPage[]; excludePrefixes: string[]; includePrefixes?: string[];
   mozToken: string; mozRows: number; volumeLimit: number;
   gsc?: { rows: GscRow[]; siteUrl: string; start: string; end: string } | null;
   ga4?: Map<string, number> | null; ga4Property?: string;
@@ -54,7 +54,10 @@ export async function buildLibrary(inp: BuildInput): Promise<Library> {
   const { domain } = inp;
   const brand = inp.brandTerms.map(b => b.toLowerCase().trim()).filter(Boolean);
   const isBranded = (k: string) => brand.some(b => k.includes(b));
-  const excluded = (p: string) => inp.excludePrefixes.some(x => p === x || p.startsWith(x.replace(/\/$/, "") + "/"));
+  const under = (p: string, x: string) => { const b = "/" + x.replace(/^https?:\/\/[^/]+/, "").replace(/^\/+|\/+$/g, ""); return b === "/" || p === b || p.startsWith(b + "/"); };
+  const inc = (inp.includePrefixes || []).filter(Boolean);
+  // Only the sections the user picked (if any), minus anything excluded.
+  const excluded = (p: string) => (inc.length > 0 && !inc.some(x => under(p, x))) || inp.excludePrefixes.some(x => under(p, x));
   const full = (p: string) => `https://${domain}${p}`;
   const pathOf = (u: string) => { try { const x = new URL(u); if (x.hostname.replace(/^www\./, "") !== domain) return null; return x.pathname.replace(/\/+$/, "") || "/"; } catch { return null; } };
   const keep = (kw: string, pos: number) => pos <= 20 && words(kw) >= 2 && !isBranded(kw);
