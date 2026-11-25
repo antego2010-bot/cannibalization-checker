@@ -1,4 +1,6 @@
 (() => {
+// On mozapitools.app the page is served through the shared domain; API calls go straight to this tool's own server.
+const API_BASE = /(^|\.)mozapitools\.app$/.test(location.hostname) ? "https://cannibalization-checker.vercel.app" : "";
 "use strict";
 const PAGE_LIB = 50, PAGE_KW = 20;
 
@@ -58,7 +60,7 @@ async function api(path, payload, opts = {}) {
     if (reqBody.byteLength > 4_300_000) throw new ApiError("Your Search Console file is too big to send in one go (over 4 MB compressed). Export a shorter date range or fewer rows, then upload it again.", "too_large", 413);
     headers["content-type"] = "application/octet-stream"; headers["x-body-encoding"] = "gzip";
   }
-  const res = await fetch("/api/" + path, { method: payload === undefined ? "GET" : "POST", headers, body: reqBody, signal: opts.signal, credentials: "same-origin" });
+  const res = await fetch(API_BASE + "/api/" + path, { method: payload === undefined ? "GET" : "POST", headers, body: reqBody, signal: opts.signal, credentials: "same-origin" });
   if (res.ok && res.headers.get("x-library-encoding") === "gzip") return await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).json();
   let data = null; try { data = await res.json(); } catch (e) {}
   if (!res.ok) { const er = (data && data.error) || {}; throw new ApiError(er.message || `Request failed (${res.status})`, er.code || "http_" + res.status, res.status); }
@@ -1050,7 +1052,7 @@ $("demo-btn").onclick = () => {
   const cb = document.getElementById("tc-claude"); if (cb && DEMO) cb.innerHTML = "";
 };
 (async () => {
-  try { const h = await fetch("/api/health").then(r => r.ok ? r.json() : {}); S.mock = !!h.mock; } catch (e) {}
+  try { const h = await fetch(API_BASE + "/api/health").then(r => r.ok ? r.json() : {}); S.mock = !!h.mock; } catch (e) {}
   applyDemo(); bindSettings(); updateStatus();
   await openLibrary();
   refreshGoogle();
