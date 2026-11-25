@@ -452,7 +452,7 @@ $("demo-btn").onclick = () => {
   const cb = document.getElementById("tc-claude"); if (cb && DEMO) cb.innerHTML = "";
 };
 (async () => {
-  try { const h = await fetch("/api/health").then(r => r.ok ? r.json() : {}); S.mock = !!h.mock; } catch (e) {}
+  try { const h = await fetch(API_BASE + "/api/health").then(r => r.ok ? r.json() : {}); S.mock = !!h.mock; } catch (e) {}
   applyDemo(); bindSettings(); updateStatus();
   await openLibrary();
   refreshGoogle();

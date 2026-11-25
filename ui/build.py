@@ -34,7 +34,7 @@ body = rep(body, 'Keywords where more than one moz.com URL ranks (Search Console
 body = rep(body, '<h2 style="font-size:17px">Does moz.com already cover this?</h2>', '<h2 style="font-size:17px">Does <span data-site>your site</span> already cover this?</h2>')
 body = rep(body, '<span class="small muted">Shared with everyone who opens this tool</span>', '<span class="small muted">Saved in this browser</span>')
 body = rep(body, "</main>", (HERE / "settings.html").read_text() + "</main>")
-body = body.rstrip() + '\n<footer class="foot small muted">Keys and libraries stay in your browser. <a href="/privacy.html">Privacy</a> · Built with the Moz API and Claude.</footer>\n'
+body = body.rstrip() + '\n<footer class="foot small muted">Keys and libraries stay in your browser. <a href="privacy.html">Privacy</a> · Built with the Moz API and Claude.</footer>\n'
 
 # ---------------- JS ----------------
 top = (HERE / "top.js").read_text()
@@ -148,7 +148,7 @@ for bad in ["moz.com", "DB.", "MCP", "SHEET", "Whiteboard"]:
         sys.exit(f"leftover {bad!r}: {lines}")
 
 app = "(() => {\n" + top + "\n" + mid + "\n" + bottom + "})();\n"
-html = head + "<body>" + body + '<script src="/app.js"></script>\n</body>\n</html>\n'
+html = head + "<body>" + body + '<script src="app.js"></script>\n</body>\n</html>\n'
 OUT.mkdir(exist_ok=True)
 (OUT / "app.js").write_text(app)
 (OUT / "index.html").write_text(html)
